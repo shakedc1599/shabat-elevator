@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>עוקב מעלית שבת</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0d0d0d">
+</head>
+
+<body>
+    <div id="inactive-overlay">
+        <h2>המעלית אינה פעילה</h2>
+        <p>פעילות מתחדשת ב-06:00</p>
+    </div>
+
+    <header class="burn-in-shield">
+        <h1>מיקום מעלית שבת</h1>
+        <button id="btn-fullscreen">⛶</button>
+    </header>
+
+    <main>
+        <div class="building-container" id="building">
+            <!-- Floors will be injected here -->
+            <div id="elevator-car"></div>
+        </div>
+
+        <div class="controls burn-in-shield">
+            <button id="btn-sync">סנכרון מיקום</button>
+            <button id="btn-settings">⚙️</button>
+        </div>
+
+        <div class="status-panel burn-in-shield">
+            <div class="status-row">
+                <span class="label">קומה נוכחית</span>
+                <span id="current-floor" class="value">--</span>
+            </div>
+            <div class="status-row">
+                <span class="label">כיוון</span>
+                <span id="direction" class="value">--</span>
+            </div>
+            <div class="status-row">
+                <span class="label">סטטוס</span>
+                <span id="status-text" class="value">מחשב...</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modals / Overlays will be added here -->
+
+    <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js');
+        }
+    </script>
+</body>
+
+</html>
