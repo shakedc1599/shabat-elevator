@@ -2,17 +2,18 @@ class ShabatElevator {
     constructor() {
         this.config = {
             totalFloors: 21,
-            floorTravelTime: 3000, // 3 seconds per floor
-            stopTime: 30000, // 30 seconds
+            floorTravelTime: 3000,
+            stopTime: 30000,
             oddStopFloors: [21, 19, 17, 15, 13, 11, 9, 7, 5, 3, 1, 0],
-            inactiveStart: 0, // 12 AM
-            inactiveEnd: 6, // 6 AM
+            inactiveStart: 0,
+            inactiveEnd: 6,
+            myFloor: 0
         };
 
         this.state = {
             syncTimestamp: Date.now(),
             syncFloor: 0,
-            syncDirection: 'UP' // 'UP' or 'DOWN'
+            syncDirection: 'UP'
         };
 
         this.loadSettings();
@@ -37,32 +38,16 @@ class ShabatElevator {
     }
 
     initUI() {
-        const building = document.getElementById('building');
-        // Clear except elevator car
-        const car = document.getElementById('elevator-car');
-        building.innerHTML = '';
-        building.appendChild(car);
-
-        for (let i = 0; i <= this.config.totalFloors; i++) {
-            const floor = document.createElement('div');
-            floor.className = 'floor';
-            floor.id = `floor-${i}`;
-            if (this.config.oddStopFloors.includes(i)) {
-                floor.classList.add('stop-floor');
-            }
-            floor.innerHTML = `<span class="floor-number">${i}</span>`;
-            building.appendChild(floor);
-        }
-
         document.getElementById('btn-sync').onclick = () => this.showSyncModal();
+        document.getElementById('btn-settings').onclick = () => this.showSettings();
         document.getElementById('btn-fullscreen').onclick = () => this.toggleFullscreen();
+        document.getElementById('target-floor-label').innerText = this.config.myFloor;
     }
 
-    calculateCurrentState() {
-        const now = Date.now();
-        const hour = new Date().getHours();
+    calculateCurrentState(currentTime) {
+        const now = currentTime || Date.now();
+        const hour = new Date(now).getHours();
 
-        // Check inactive period
         if (hour >= this.config.inactiveStart && hour < this.config.inactiveEnd) {
             return { isInactive: true };
         }
@@ -72,56 +57,97 @@ class ShabatElevator {
             (this.config.oddStopFloors.length * this.config.stopTime);
         const fullCycleTime = upTripTime + downTripTime;
 
-        // Find offset from sync point
         let msSinceSync = now - this.state.syncTimestamp;
-
-        // Adjust for initial sync state (simplification: assume sync happened at start of a state)
-        // If sync was at floor X going UP:
         let initialOffset = 0;
         if (this.state.syncDirection === 'UP') {
             initialOffset = this.state.syncFloor * this.config.floorTravelTime;
         } else {
-            // Complex case: sync during DOWN trip
-            // For now, let's assume sync always sets start of a movement/stop
             initialOffset = upTripTime + ((21 - this.state.syncFloor) * this.config.floorTravelTime);
-            // Add stops already passed
             const passedStops = this.config.oddStopFloors.filter(f => f > this.state.syncFloor).length;
             initialOffset += passedStops * this.config.stopTime;
         }
 
         let totalMs = (msSinceSync + initialOffset) % fullCycleTime;
 
-        // Determine where we are in the cycle
         if (totalMs < upTripTime) {
-            // Going UP
-            const floor = totalMs / this.config.floorTravelTime;
-            return { floor: floor, direction: 'UP', status: 'עולה ישר' };
+            return { floor: totalMs / this.config.floorTravelTime, direction: 'UP', status: 'עולה ישר', cycleTime: totalMs, fullCycleTime };
         } else {
-            // Going DOWN
             let downMs = totalMs - upTripTime;
             let currentDownMs = 0;
-
             for (let i = 0; i < this.config.oddStopFloors.length; i++) {
                 const targetFloor = this.config.oddStopFloors[i];
                 const prevFloor = (i === 0) ? 21 : this.config.oddStopFloors[i - 1];
+                const travelToFloorTime = (prevFloor - targetFloor) * this.config.floorTravelTime;
 
-                // Travel to this floor
-                const travelToFloor = (prevFloor - targetFloor) * this.config.floorTravelTime;
-                if (downMs < currentDownMs + travelToFloor) {
+                if (downMs < currentDownMs + travelToFloorTime) {
                     const progress = (downMs - currentDownMs) / this.config.floorTravelTime;
-                    return { floor: prevFloor - progress, direction: 'DOWN', status: 'בתנועה' };
+                    return { floor: prevFloor - progress, direction: 'DOWN', status: 'בתנועה', cycleTime: totalMs, fullCycleTime };
                 }
-                currentDownMs += travelToFloor;
+                currentDownMs += travelToFloorTime;
 
-                // Stop at this floor
                 if (downMs < currentDownMs + this.config.stopTime) {
-                    return { floor: targetFloor, direction: 'DOWN', status: 'עצירה (30 שנ\')' };
+                    return { floor: targetFloor, direction: 'DOWN', status: 'עצירה', cycleTime: totalMs, fullCycleTime };
                 }
                 currentDownMs += this.config.stopTime;
             }
         }
+        return { floor: 0, direction: 'UP', status: 'מתחיל', cycleTime: 0, fullCycleTime };
+    }
 
-        return { floor: 0, direction: 'UP', status: 'מתחיל מחזור' };
+    calculateTimeToFloor(targetFloor) {
+        const now = Date.now();
+        const currentState = this.calculateCurrentState(now);
+        if (currentState.isInactive) return { time: null };
+
+        let actualTarget = targetFloor;
+        let note = "";
+
+        // If target floor is not a stopping floor, target the one above it
+        if (!this.config.oddStopFloors.includes(targetFloor)) {
+            actualTarget = targetFloor + 1;
+            note = `*מחושב לפי קומה ${actualTarget} (עצירה קרובה)`;
+        }
+
+        const upTripTime = this.config.totalFloors * this.config.floorTravelTime;
+        const step = 1000;
+        let timeElapsed = 0;
+        let checkMs = currentState.cycleTime;
+
+        while (timeElapsed < currentState.fullCycleTime) {
+            const simMs = (checkMs + timeElapsed) % currentState.fullCycleTime;
+            let simFloor = 0;
+            let isStopping = false;
+
+            if (simMs < upTripTime) {
+                simFloor = simMs / this.config.floorTravelTime;
+            } else {
+                let downMs = simMs - upTripTime;
+                let cMs = 0;
+                for (let i = 0; i < this.config.oddStopFloors.length; i++) {
+                    const f = this.config.oddStopFloors[i];
+                    const prevF = (i === 0) ? 21 : this.config.oddStopFloors[i - 1];
+                    const tTime = (prevF - f) * this.config.floorTravelTime;
+                    if (downMs < cMs + tTime) {
+                        simFloor = prevF - ((downMs - cMs) / this.config.floorTravelTime);
+                        break;
+                    }
+                    cMs += tTime;
+                    if (downMs < cMs + this.config.stopTime) {
+                        simFloor = f;
+                        isStopping = true;
+                        break;
+                    }
+                    cMs += this.config.stopTime;
+                }
+            }
+
+            // ONLY count if it's the target floor AND it's a stop (on the way down)
+            if (isStopping && Math.abs(simFloor - actualTarget) < 0.1) {
+                return { time: timeElapsed, note: note };
+            }
+            timeElapsed += step;
+        }
+        return { time: null, note: "" };
     }
 
     updateUI() {
@@ -135,58 +161,57 @@ class ShabatElevator {
             overlay.style.display = 'none';
         }
 
-        const floorVal = typeof state.floor === 'number' ? state.floor.toFixed(1) : '--';
-        document.getElementById('current-floor').innerText = Math.round(state.floor);
-        document.getElementById('direction').innerText = state.direction === 'UP' ? '⬆️ עליה' : '⬇️ ירידה';
-        document.getElementById('status-text').innerText = state.status;
+        document.getElementById('floor-display').innerText = Math.round(state.floor);
+        document.getElementById('direction-indicator').innerText = (state.direction === 'UP' ? 'עולה ↑' : 'יורד ↓') + ' (' + state.status + ')';
 
-        // Move elevator car
-        const car = document.getElementById('elevator-car');
-        const floorHeight = 60; // matches CSS
-        car.style.bottom = `${(state.floor * floorHeight) + 32}px`;
+        const result = this.calculateTimeToFloor(this.config.myFloor);
+        const timerEl = document.getElementById('target-timer');
+        const noteEl = document.getElementById('timer-note');
 
-        // Highlight floor
-        document.querySelectorAll('.floor').forEach(f => f.classList.remove('active'));
-        const activeFloorEl = document.getElementById(`floor-${Math.round(state.floor)}`);
-        if (activeFloorEl) activeFloorEl.classList.add('active');
+        if (result.time !== null) {
+            const mins = Math.floor(result.time / 60000);
+            const secs = Math.floor((result.time % 60000) / 1000);
+            timerEl.innerText = `${mins}:${secs.toString().padStart(2, '0')}`;
+            noteEl.innerText = result.note;
+        } else {
+            timerEl.innerText = '--:--';
+            noteEl.innerText = "";
+        }
     }
 
     startEngine() {
-        setInterval(() => this.updateUI(), 100);
+        setInterval(() => this.updateUI(), 1000);
     }
 
     showSyncModal() {
-        // Simple prompt for now, but in a real app we'd use the modal HTML
-        const floor = prompt("באיזו קומה המעלית עכשיו? (0-21)", "0");
+        const floor = prompt("באיזו קומה המעלית עכשיו?", "21"); // Default to 21 for convenience
         if (floor === null) return;
-        const dir = confirm("האם היא בעליה? (OK לעליה, Cancel לירידה)") ? 'UP' : 'DOWN';
 
         this.state.syncTimestamp = Date.now();
         this.state.syncFloor = parseInt(floor);
-        this.state.syncDirection = dir;
+        this.state.syncDirection = 'DOWN'; // Always assume DOWN as requested
         this.saveSettings();
+        alert("סונכרן בהצלחה! (המעלית הוגדרה במצב ירידה)");
     }
 
     showSettings() {
-        const newTime = prompt("כמה שניות לוקח למעלית לעבור קומה?", (this.config.floorTravelTime / 1000).toString());
-        if (newTime) {
-            this.config.floorTravelTime = parseFloat(newTime) * 1000;
-            this.saveSettings();
+        const f = prompt("מה הקומה שלך? (להצגת הטיימר)", this.config.myFloor);
+        if (f !== null) {
+            this.config.myFloor = parseInt(f);
+            document.getElementById('target-floor-label').innerText = f;
         }
+        const t = prompt("זמן מעבר בין קומות (שניות):", (this.config.floorTravelTime / 1000).toString());
+        if (t) this.config.floorTravelTime = parseFloat(t) * 1000;
+        this.saveSettings();
     }
 
     toggleFullscreen() {
         if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(e => {
-                alert(`Error: ${e.message}`);
-            });
+            document.documentElement.requestFullscreen().catch(() => { });
         } else {
             document.exitFullscreen();
         }
     }
 }
 
-window.onload = () => {
-    const app = new ShabatElevator();
-    document.getElementById('btn-settings').onclick = () => app.showSettings();
-};
+window.onload = () => new ShabatElevator();
