@@ -6,7 +6,7 @@ class ShabatElevator {
             stopTime: 30000,
             oddStopFloors: [21, 19, 17, 15, 13, 11, 9, 7, 5, 3, 1, 0],
             inactiveStart: 0,
-            inactiveEnd: 6,
+            inactiveEnd: 7,
             myFloor: 0
         };
 
